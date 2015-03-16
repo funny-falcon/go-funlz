@@ -8,16 +8,29 @@ import (
 
 var _ = log.Print
 
-const window = 4096
-const buffer = 2 * window
-const smallLit = 31
-const maxLit = smallLit + 256
-const minCopy = 4
-const smallCopy = 16
-const maxCopy = smallCopy + 256
+/* tunable consts */
+const (
+	backref = 1  /* number of backreferences for each hash slot */
+	hashlog = 11 /* log2 of hash positions */
+)
+
+/* this constants are defined by format and should not be changed */
+const (
+	window    = 4096
+	buffer    = 2 * window
+	smallLit  = 31
+	maxLit    = smallLit + 256
+	minCopy   = 4
+	smallCopy = 16
+	maxCopy   = smallCopy + 256
+	hashsize  = 1 << hashlog
+)
+
+/* mostly random const needed to compute hash */
 const somemagicconst = 0x53215229
 
-type positions [2]uint32
+/* size of positions could be increased to accieve more compression */
+type positions [backref]uint32
 
 func (p *positions) push(u uint32) {
 	copy(p[1:], p[:len(p)-1])
@@ -87,16 +100,29 @@ func (bw *bytewrite2) byte3(b1, b2, b3 byte) (err error) {
 	return
 }
 
+/*
+Writer is a streaming compressor.
+It does no output buffering, so you should pass in buffered output.
+Output stream is not framed and not checksumed.
+
+	out := bufio.NewWriter(my_sock)
+	comp := funlz.NewWriter(out)
+	comp.Write(message1)
+	comp.Write(message2)
+	comp.Flush()
+	out.Flush()
+*/
 type Writer struct {
 	w          bytewriter
 	err        error
-	upos, wpos uint32         /* uncompressed pos and write pos in raw buffer */
-	last       uint32         /* last 4 chars */
-	litlen     uint32         /* lengh of last literal */
-	hash       [512]positions /* hash of positions */
-	raw        [buffer]byte   /* input buffer */
+	upos, wpos uint32              /* uncompressed pos and write pos in raw buffer */
+	last       uint32              /* last 4 chars */
+	litlen     uint32              /* lengh of last literal */
+	hash       [hashsize]positions /* hash of positions */
+	raw        [buffer]byte        /* input buffer */
 }
 
+// NewWriter wraps io.Writer into Writer
 func NewWriter(wr io.Writer) (w *Writer) {
 	w = &Writer{}
 	if wb, ok := wr.(writeAndByteWriter); ok {
@@ -109,8 +135,7 @@ func NewWriter(wr io.Writer) (w *Writer) {
 
 const wmask = 0x7f /* window mask */
 
-/* need at least 4096 bytes for backref */
-
+// Write provides io.Writer
 func (w *Writer) Write(b []byte) (bytes int, err error) {
 	if w.err != nil {
 		return 0, w.err
@@ -170,7 +195,7 @@ func (w *Writer) compress() (err error) {
 	for upos < wpos {
 		cur := w.raw[upos%buffer]
 		last = (last << 8) | uint32(cur)
-		h := (last * somemagicconst) >> 23
+		h := (last * somemagicconst) >> (32 - hashlog)
 		if litlen < minCopy-1 {
 			upos++
 			w.hash[h].push(upos)
@@ -246,7 +271,7 @@ func (w *Writer) compress() (err error) {
 			}
 			for i := m.l - m.cut; i != 0; i-- {
 				last = (last << 8) | uint32(w.raw[upos%buffer])
-				h = (last * somemagicconst) >> 23
+				h = (last * somemagicconst) >> (32 - hashlog)
 				upos++
 				w.hash[h].push(upos)
 			}
@@ -312,6 +337,7 @@ func (w *Writer) clear() {
 	w.last = 0
 }
 
+// Flush writes all unwritten data to output. Returns error encounted during writting.
 func (w *Writer) Flush() (err error) {
 	if w.err != nil {
 		return w.err
@@ -327,6 +353,10 @@ type readAndByteReader interface {
 	io.ByteReader
 }
 
+/*
+Reader is a streaming decompressor.
+Input is tested to have ReadByte method. If it has no, then input is wrapped into bufio.NewReader.
+*/
 type Reader struct {
 	r          readAndByteReader
 	err        error
@@ -334,6 +364,8 @@ type Reader struct {
 	raw        [buffer]byte /* uncompressed data */
 }
 
+// NewReader wraps io.Reader into Reader
+// If input provides ReadByte, then it is not wrapped by bufio.Reader
 func NewReader(rd io.Reader) (r *Reader) {
 	r = &Reader{}
 	if rb, ok := rd.(readAndByteReader); ok {
@@ -344,6 +376,7 @@ func NewReader(rd io.Reader) (r *Reader) {
 	return
 }
 
+// Read provides io.Reader
 func (r *Reader) Read(b []byte) (bytes int, err error) {
 	if r.err != nil {
 		return 0, r.err

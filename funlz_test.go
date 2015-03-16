@@ -109,21 +109,26 @@ func eq(a, b []byte) int {
 	return -1
 }
 
-var patterns = [][2][]byte{
-	[2][]byte{[]byte("asdfasdf"), []byte("\x03asdf\x20\x03")},
-	[2][]byte{[]byte("aaaaaaaa"), []byte("\x00a\x50\x00")},
-	[2][]byte{[]byte("aaaaaaaab"), []byte("\x00a\x50\x00\x00b")},
-	[2][]byte{[]byte("baaaaaaaab"), []byte("\x01ba\x50\x00\x00b")},
-	[2][]byte{[]byte("baaaaacaaaaaaaaaaaaaaaaaaaaaaaaaaaab"), []byte("\x01ba\x20\x00\x00c\x30\x05\xf0\x00\x06\x00b")},
-	[2][]byte{[]byte("baaaaacaaaaaaaaaaaaaaaaaaaaaaaaaaab"), []byte("\x01ba\x20\x00\x00c\x30\x05\xf0\x00\x05\x00b")},
-	[2][]byte{
-		[]byte("This is a new era of my life with all good things"),
-		[]byte("\x1f\x11This is a new era of my life with all good things"),
-	},
-	[2][]byte{
-		[]byte("This is a new era of my life with all good things. That is my new life."),
-		[]byte("\x1f\x17This is a new era of my life with all good things. That\x20\x32\x01my\x30\x33\x20\x29\x00."),
-	},
+var patterns [][2][]byte
+
+func add(raw, comp string) {
+	patterns = append(patterns, [2][]byte{[]byte(raw), []byte(comp)})
+}
+
+func init() {
+	add("asdfasdf", "\x03asdf\x20\x03")
+	add("aaaaaaaa", "\x00a\x50\x00")
+	add("aaaaaaaab", "\x00a\x50\x00\x00b")
+	add("baaaaaaaab", "\x01ba\x50\x00\x00b")
+	if backref > 1 {
+		add("baaaaacaaaaaaaaaaaaaaaaaaaaaaaaaaaab", "\x01ba\x20\x00\x00c\x30\x05\xf0\x00\x06\x00b")
+		add("baaaaacaaaaaaaaaaaaaaaaaaaaaaaaaaab", "\x01ba\x20\x00\x00c\x30\x05\xf0\x00\x05\x00b")
+	} else {
+		add("baaaaacaaaaaaaaaaaaaaaaaaaaaaaaaaaab", "\x01ba\x20\x00\x00c\x20\x04\xf0\x00\x07\x00b")
+		add("baaaaacaaaaaaaaaaaaaaaaaaaaaaaaaaab", "\x01ba\x20\x00\x00c\x20\x04\xf0\x00\x06\x00b")
+	}
+	add("This is a new era of my life with all good things", "\x1f\x11This is a new era of my life with all good things")
+	add("This is a new era of my life with all good things. That is my new life.", "\x1f\x17This is a new era of my life with all good things. That\x20\x32\x01my\x30\x33\x20\x29\x00.")
 }
 
 var original, original1, compressed, compressed11111, flatted, flatted11111 []byte
