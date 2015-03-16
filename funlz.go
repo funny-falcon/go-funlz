@@ -8,18 +8,13 @@ import (
 
 var _ = log.Print
 
-//const window = 4096
-const window = 64
+const window = 4096
 const buffer = 2 * window
 const smallLit = 31
-
-//const maxLit = 32 + 255
-const maxLit = 60
+const maxLit = smallLit + 256
 const minCopy = 4
 const smallCopy = 16
-
-//const maxCopy = smallCopy + 256
-const maxCopy = 60
+const maxCopy = smallCopy + 256
 const somemagicconst = 0x53215229
 
 type positions [2]uint32
@@ -149,13 +144,11 @@ func (w *Writer) Write(b []byte) (bytes int, err error) {
 		if do_compress {
 			if err = w.compress(); err != nil {
 				bytes -= int((w.wpos + buffer - w.upos) % buffer)
-				log.Print("compress error", err)
 				break
 			}
 			if w.wpos == 0xffffffff {
 				if err = w.flush(); err != nil {
 					bytes -= int((w.wpos + buffer - w.upos) % buffer)
-					log.Print("flush error", err)
 					break
 				}
 				w.clear()
@@ -175,7 +168,8 @@ func (w *Writer) compress() (err error) {
 		upos++
 	}
 	for upos < wpos {
-		last = (last << 8) | uint32(w.raw[upos%buffer])
+		cur := w.raw[upos%buffer]
+		last = (last << 8) | uint32(cur)
 		h := (last * somemagicconst) >> 23
 		if litlen < minCopy-1 {
 			upos++
@@ -187,14 +181,14 @@ func (w *Writer) compress() (err error) {
 		m := struct{ l, p, cut uint32 }{0, 0, 0}
 		for _, p := range poses {
 			/* insert new position and shift stored */
-			if upos-p > window || p == 0 {
+			if upos-p+litlen > window || p == 0 {
 				continue
 			}
 			p--
-			if w.raw[p%buffer] != w.raw[upos%buffer] {
+			if w.raw[p%buffer] != cur {
 				continue
 			}
-			lastAtP := uint32(w.raw[p%buffer]) | uint32(w.raw[(p-1)%buffer])<<8 |
+			lastAtP := uint32(cur) | uint32(w.raw[(p-1)%buffer])<<8 |
 				uint32(w.raw[(p-2)%buffer])<<16 | uint32(w.raw[(p-3)%buffer])<<24
 			if lastAtP != last {
 				continue
@@ -215,7 +209,7 @@ func (w *Writer) compress() (err error) {
 			}
 			pb++
 			ub++
-			for ue <= wpos && w.raw[pe%buffer] == w.raw[ue%buffer] && l < maxCopy {
+			for ue < wpos && w.raw[pe%buffer] == w.raw[ue%buffer] && l < maxCopy {
 				l++
 				ue++
 				pe++
@@ -229,7 +223,7 @@ func (w *Writer) compress() (err error) {
 		upos++
 		poses.push(upos)
 		litlen++
-		if m.l == 0 {
+		if m.l < minCopy {
 			if litlen == maxLit+minCopy {
 				if err = w.emitLit(upos-litlen, maxLit); err != nil {
 					upos -= litlen
@@ -266,7 +260,6 @@ func (w *Writer) compress() (err error) {
 }
 
 func (w *Writer) emitLit(pos, l uint32) (err error) {
-	log.Printf("emitLit  %4d @ %d", l, pos)
 	if l <= smallLit {
 		if err = w.w.byte1(byte(l - 1)); err != nil {
 			return
@@ -278,9 +271,6 @@ func (w *Writer) emitLit(pos, l uint32) (err error) {
 	}
 	rpos := pos % buffer
 	var n int
-	if pos == 1<<20 {
-		log.Print("pos ", pos, w.raw[rpos:], w.raw[:l-(buffer-rpos)])
-	}
 	if rpos+l <= buffer {
 		_, err = w.w.Write(w.raw[rpos : rpos+l])
 	} else if n, err = w.w.Write(w.raw[rpos:]); err == nil {
@@ -290,7 +280,6 @@ func (w *Writer) emitLit(pos, l uint32) (err error) {
 }
 
 func (w *Writer) emitCopy(off, l uint32) (err error) {
-	log.Printf("emitCopy %4d @ %d", l, off)
 	off--
 	hi, lo := byte(off>>8), byte(off)
 	if l <= smallCopy {
@@ -407,9 +396,6 @@ func (r *Reader) Read(b []byte) (bytes int, err error) {
 					}
 					if _, err = io.ReadFull(r.r, r.raw[:int(l)-n]); err != nil {
 						goto Err
-					}
-					if r.wpos == 1<<20 {
-						log.Print("pos ", r.wpos, r.raw[p:], r.raw[:int(l)-n])
 					}
 				}
 				r.wpos += l
