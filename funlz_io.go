@@ -8,12 +8,6 @@ import (
 
 var _ = log.Print
 
-/* tunable consts */
-const (
-	backref = 1  /* number of backreferences for each hash slot */
-	hashlog = 11 /* log2 of hash positions */
-)
-
 /* this constants are defined by format and should not be changed */
 const (
 	window    = 4096
@@ -28,14 +22,6 @@ const (
 
 /* mostly random const needed to compute hash */
 const somemagicconst = 0x53215229
-
-/* size of positions could be increased to accieve more compression */
-type positions [backref]uint32
-
-func (p *positions) push(u uint32) {
-	copy(p[1:], p[:len(p)-1])
-	p[0] = u
-}
 
 type writeAndByteWriter interface {
 	io.Writer
@@ -204,47 +190,88 @@ func (w *Writer) compress() (err error) {
 		}
 		poses := &w.hash[h]
 		m := struct{ l, p, cut uint32 }{0, 0, 0}
-		for _, p := range poses {
-			/* insert new position and shift stored */
+		var p, lastAtP, pb, pe, ub, ue, lim uint32
+		{
+			p = poses[0]
 			if upos-p+litlen > window || p == 0 {
-				continue
+				goto LoopEnd
 			}
 			p--
 			if w.raw[p%buffer] != cur {
-				continue
+				goto Loop
 			}
-			lastAtP := uint32(cur) | uint32(w.raw[(p-1)%buffer])<<8 |
+			lastAtP = uint32(cur) | uint32(w.raw[(p-1)%buffer])<<8 |
 				uint32(w.raw[(p-2)%buffer])<<16 | uint32(w.raw[(p-3)%buffer])<<24
 			if lastAtP != last {
-				continue
+				goto Loop
 			}
-			pb, pe := p-4, p+1
-			ub, ue := upos-4, upos+1
-			l := uint32(4)
-			var cutmax uint32
-			if p > litlen {
-				cutmax = litlen
-			} else {
-				cutmax = p
+			pb, pe = p-4, p+1
+			ub, ue = upos-4, upos+1
+			lim = p - litlen
+			if p < litlen {
+				lim = 0
 			}
-			for l < cutmax && w.raw[pb%buffer] == w.raw[ub%buffer] {
-				l++
+			for pb > lim && w.raw[pb%buffer] == w.raw[ub%buffer] {
 				pb--
 				ub--
 			}
 			pb++
 			ub++
-			for ue < wpos && w.raw[pe%buffer] == w.raw[ue%buffer] && l < maxCopy {
-				l++
+			lim = ue - ub + maxCopy
+			if lim > wpos {
+				lim = wpos
+			}
+			for ue < wpos && w.raw[pe%buffer] == w.raw[ue%buffer] {
 				ue++
 				pe++
 			}
-			if m.l < l {
-				m.l = l
+			m.l = pe - pb
+			m.p = pb
+			m.cut = p + 1 - pb
+		}
+	Loop:
+		for i := 1; i < len(poses); i++ {
+			p = poses[i]
+			/* insert new position and shift stored */
+			if upos-p+litlen > window || p == 0 {
+				break
+			}
+			p--
+			if w.raw[p%buffer] != cur {
+				continue
+			}
+			lastAtP = uint32(cur) | uint32(w.raw[(p-1)%buffer])<<8 |
+				uint32(w.raw[(p-2)%buffer])<<16 | uint32(w.raw[(p-3)%buffer])<<24
+			if lastAtP != last {
+				continue
+			}
+			pb, pe = p-4, p+1
+			ub, ue = upos-4, upos+1
+			lim = p - litlen
+			if p < litlen {
+				lim = 0
+			}
+			for pb > lim && w.raw[pb%buffer] == w.raw[ub%buffer] {
+				pb--
+				ub--
+			}
+			pb++
+			ub++
+			lim = ue - ub + maxCopy
+			if lim > wpos {
+				lim = wpos
+			}
+			for ue < wpos && w.raw[pe%buffer] == w.raw[ue%buffer] {
+				ue++
+				pe++
+			}
+			if m.l < pe-pb {
+				m.l = pe - pb
 				m.p = pb
 				m.cut = p + 1 - pb
 			}
 		}
+	LoopEnd:
 		upos++
 		poses.push(upos)
 		litlen++

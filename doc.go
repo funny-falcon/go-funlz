@@ -15,6 +15,29 @@ Format is derived from lzf but window reduced to 4096 bytes and short copy limit
 
 For performance reason, tunable parameters are constants and not exposed.
 So you encouraged to copy this library to your project and tune them.
+All tunable params and functions are in doc.go .
 
 */
 package funlz
+
+/*
+tunable consts
+backref = 1 is always faster
+backref/hashlog 1/11 usualy gives same compression ratio size as 2/9, but faster
+backref/hashlog 4/12 gives good compression ratio, but it is slow
+*/
+const (
+	backref = 1  /* number of backreferences for each hash slot */
+	hashlog = 11 /* log2 of hash positions */
+)
+
+/* size of positions could be increased to accieve more compression */
+type positions [backref]uint32
+
+/* you should fix this function accordantly to backref value */
+func (p *positions) push(u uint32) {
+	//p[3] = p[2]
+	//p[2] = p[1]
+	//p[1] = p[0]
+	p[0] = u
+}
