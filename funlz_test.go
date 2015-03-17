@@ -3,6 +3,7 @@ package funlz
 import (
 	"bytes"
 	"compress/flate"
+	"hash/crc32"
 	"io"
 	"io/ioutil"
 	"log"
@@ -67,6 +68,25 @@ func compByPart(c writeAndFlusher, n int) {
 		p += rnd % 128
 		p = p % (1 << 18)
 	}
+}
+
+type circBuffReader struct {
+	b   []byte
+	pos int
+}
+
+func (c *circBuffReader) Read(b []byte) (int, error) {
+	bytes := 0
+	for len(b) != 0 {
+		n := copy(b, c.b[c.pos:])
+		b = b[n:]
+		c.pos += n
+		if c.pos == len(c.b) {
+			c.pos = 0
+		}
+		bytes += n
+	}
+	return bytes, nil
 }
 
 type circDecomp struct {
@@ -142,6 +162,8 @@ func init() {
 	flatted11111 = inflate(original[:11111])
 }
 
+var crc32c = crc32.MakeTable(crc32.Castagnoli)
+
 func TestWriter(t *testing.T) {
 	for _, p := range patterns {
 		u, c := p[0], p[1]
@@ -171,6 +193,52 @@ func TestBigFile(t *testing.T) {
 	log.Printf("orig/comp %d/%d", len(original), len(compressed))
 	if p := eq(original, decompressed); p != -1 {
 		t.Errorf("big are not equal %d %d %d %d", len(original), len(compressed), len(decompressed), p)
+	}
+}
+
+func TestHugeFile(t *testing.T) {
+	var crc1, crc2 uint32
+	var sz1, sz2 int
+	fl := circBuffReader{b: original}
+	rd, wr := io.Pipe()
+	fin := make(chan struct{})
+	comp := NewWriter(wr)
+	decomp := NewReader(rd)
+	log.Print("HugeFile")
+	go func() {
+		var buf [512]byte
+		var last int
+		for {
+			n, _ := decomp.Read(buf[:])
+			if n == 0 {
+				break
+			}
+			crc2 = crc32.Update(crc2, crc32c, buf[:n])
+			sz2 += n
+			if sz2/1000000 > last {
+				last = sz2 / 1000000
+				log.Printf("hugefile: %d bytes", sz2)
+			}
+		}
+		close(fin)
+	}()
+	var buf [512]byte
+	for sz1 = 0; sz1 < 3*1<<29; sz1 += len(buf) {
+		k, _ := fl.Read(buf[:])
+		if k != 512 {
+			panic("k!=512")
+		}
+		crc1 = crc32.Update(crc1, crc32c, buf[:])
+		comp.Write(buf[:])
+	}
+	comp.Flush()
+	wr.Close()
+	<-fin
+	if sz1 != sz2 {
+		t.Errorf("sz1=%d sz2=%d", sz1, sz2)
+	}
+	if crc1 != crc2 {
+		t.Errorf("crc32 mismatch")
 	}
 }
 
