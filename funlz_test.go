@@ -136,19 +136,19 @@ func add(raw, comp string) {
 }
 
 func init() {
-	add("asdfasdf", "\x03asdf\x20\x03")
-	add("aaaaaaaa", "\x00a\x50\x00")
-	add("aaaaaaaab", "\x00a\x50\x00\x00b")
-	add("baaaaaaaab", "\x01ba\x50\x00\x00b")
+	add("asdfasdf", "\x04asdf\x20\x03\x00")
+	add("aaaaaaaa", "\x01a\x50\x00\x00")
+	add("aaaaaaaab", "\x01a\x50\x00\x01b\x00")
+	add("baaaaaaaab", "\x02ba\x50\x00\x01b\x00")
 	if backref > 1 {
-		add("baaaaacaaaaaaaaaaaaaaaaaaaaaaaaaaaab", "\x01ba\x20\x00\x00c\x30\x05\xf0\x00\x06\x00b")
-		add("baaaaacaaaaaaaaaaaaaaaaaaaaaaaaaaab", "\x01ba\x20\x00\x00c\x30\x05\xf0\x00\x05\x00b")
+		add("baaaaacaaaaaaaaaaaaaaaaaaaaaaaaaaaab", "\x02ba\x20\x00\x01c\x30\x05\xf0\x00\x06\x01b\x00")
+		add("baaaaacaaaaaaaaaaaaaaaaaaaaaaaaaaab", "\x02ba\x20\x00\x01c\x30\x05\xf0\x00\x05\x01b\x00")
 	} else {
-		add("baaaaacaaaaaaaaaaaaaaaaaaaaaaaaaaaab", "\x01ba\x20\x00\x00c\x20\x04\xf0\x00\x07\x00b")
-		add("baaaaacaaaaaaaaaaaaaaaaaaaaaaaaaaab", "\x01ba\x20\x00\x00c\x20\x04\xf0\x00\x06\x00b")
+		add("baaaaacaaaaaaaaaaaaaaaaaaaaaaaaaaaab", "\x02ba\x20\x00\x01c\x20\x04\xf0\x00\x07\x01b\x00")
+		add("baaaaacaaaaaaaaaaaaaaaaaaaaaaaaaaab", "\x02ba\x20\x00\x01c\x20\x04\xf0\x00\x06\x01b\x00")
 	}
-	add("This is a new era of my life with all good things", "\x1f\x11This is a new era of my life with all good things")
-	add("This is a new era of my life with all good things. That is my new life.", "\x1f\x17This is a new era of my life with all good things. That\x20\x32\x01my\x30\x33\x20\x29\x00.")
+	add("This is a new era of my life with all good things", "\x1f\x12This is a new era of my life with all good things\x00")
+	add("This is a new era of my life with all good things. That is my new life.", "\x1f\x18This is a new era of my life with all good things. That\x20\x32\x02my\x30\x33\x20\x29\x01.\x00")
 }
 
 var original, original1, compressed, compressed11111, flatted, flatted11111 []byte
@@ -197,6 +197,9 @@ func TestBigFile(t *testing.T) {
 }
 
 func TestHugeFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skip in short mode")
+	}
 	var crc1, crc2 uint32
 	var sz1, sz2 int
 	fl := circBuffReader{b: original}
