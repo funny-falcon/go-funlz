@@ -12,7 +12,7 @@ var _ = log.Print
 const (
 	window    = 4096
 	buffer    = 2 * window
-	smallLit  = 31
+	smallLit  = 30
 	maxLit    = smallLit + 256
 	minCopy   = 4
 	smallCopy = 16
@@ -313,11 +313,11 @@ func (w *Writer) compress() (err error) {
 
 func (w *Writer) emitLit(pos, l uint32) (err error) {
 	if l <= smallLit {
-		if err = w.w.byte1(byte(l - 1)); err != nil {
+		if err = w.w.byte1(byte(l)); err != nil {
 			return
 		}
 	} else {
-		if err = w.w.byte2((smallLit + 1 - 1), byte(l-(smallLit+1))); err != nil {
+		if err = w.w.byte2((smallLit + 1), byte(l-(smallLit+1))); err != nil {
 			return
 		}
 	}
@@ -342,13 +342,17 @@ func (w *Writer) emitCopy(off, l uint32) (err error) {
 	return
 }
 
-func (w *Writer) flush() (err error) {
+func (w *Writer) flush() error {
 	if w.litlen > 0 {
-		err = w.emitLit(w.upos-w.litlen, w.litlen)
-		w.err = err
+		w.err = w.emitLit(w.upos-w.litlen, w.litlen)
 		w.litlen = 0
 	}
-	return
+	if w.err != nil {
+		return w.err
+	}
+	// flush mark
+	w.err = w.w.byte1(0)
+	return w.err
 }
 
 func (w *Writer) clear() {
@@ -373,6 +377,10 @@ func (w *Writer) Flush() (err error) {
 		return
 	}
 	return w.flush()
+}
+
+func (w *Writer) Close() (err error) {
+	return w.Flush()
 }
 
 type readAndByteReader interface {
@@ -403,6 +411,13 @@ func NewReader(rd io.Reader) (r *Reader) {
 	return
 }
 
+func (r *Reader) Close() error {
+	if r.err == io.EOF {
+		return nil
+	}
+	return r.err
+}
+
 // Read provides io.Reader
 func (r *Reader) Read(b []byte) (bytes int, err error) {
 	if r.err != nil {
@@ -428,7 +443,10 @@ func (r *Reader) Read(b []byte) (bytes int, err error) {
 				r.rpos = 0
 				r.wpos = 0
 			}
-		} else if r.err = r.readTag(); r.err != nil {
+		} else if err = r.readTag(); err != nil {
+			if err == io.ErrNoProgress {
+				err = nil
+			}
 			return
 		}
 	}
@@ -442,10 +460,14 @@ func (r *Reader) readTag() (err error) {
 	if err != nil {
 		return
 	}
+	if tag == 0 {
+		/* flush mark */
+		return io.ErrNoProgress
+	}
 	if tag < 0x20 {
 		/* literal */
-		l = uint32(tag + 1)
-		if tag == 0x1f {
+		l = uint32(tag)
+		if tag == smallLit+1 {
 			add, err = r.r.ReadByte()
 			if err != nil {
 				return
