@@ -428,67 +428,71 @@ func (r *Reader) Read(b []byte) (bytes int, err error) {
 				r.rpos = 0
 				r.wpos = 0
 			}
-		} else {
-			var tag, add, low byte
-			tag, err = r.r.ReadByte()
-			if err != nil {
-				goto Err
-			}
-			if tag < 0x20 {
-				/* literal */
-				l = uint32(tag + 1)
-				if tag == 0x1f {
-					add, err = r.r.ReadByte()
-					if err != nil {
-						goto Err
-					}
-					l += uint32(add)
-				}
-				p := r.wpos % buffer
-				if p+l <= buffer {
-					if _, err = io.ReadFull(r.r, r.raw[p:p+l]); err != nil {
-						goto Err
-					}
-				} else {
-					var n int
-					if n, err = io.ReadFull(r.r, r.raw[p:]); err != nil {
-						goto Err
-					}
-					if _, err = io.ReadFull(r.r, r.raw[:int(l)-n]); err != nil {
-						goto Err
-					}
-				}
-				r.wpos += l
-			} else {
-				low, err = r.r.ReadByte()
-				if err != nil {
-					goto Err
-				}
-				off := (uint32((tag&0x0f))<<8 | uint32(low)) + 1
-				l = uint32((tag >> 4) + 2)
-				if tag>>4 == smallCopy-1 {
-					add, err = r.r.ReadByte()
-					if err != nil {
-						goto Err
-					}
-					l += uint32(add)
-				}
-				p := r.wpos % buffer
-				f := (r.wpos - off) % buffer
-				for off < l {
-					r.copyN(f, p, off)
-					l -= off
-					r.wpos += off
-					p = r.wpos % buffer
-					off *= 2
-				}
-				r.copyN(f, p, l)
-				r.wpos += l
-			}
+		} else if r.err = r.readTag(); r.err != nil {
+			return
 		}
 	}
-Err:
-	r.err = err
+	return
+}
+
+func (r *Reader) readTag() (err error) {
+	var tag, add, low byte
+	var l uint32
+	tag, err = r.r.ReadByte()
+	if err != nil {
+		return
+	}
+	if tag < 0x20 {
+		/* literal */
+		l = uint32(tag + 1)
+		if tag == 0x1f {
+			add, err = r.r.ReadByte()
+			if err != nil {
+				return
+			}
+			l += uint32(add)
+		}
+		p := r.wpos % buffer
+		if p+l <= buffer {
+			if _, err = io.ReadFull(r.r, r.raw[p:p+l]); err != nil {
+				return
+			}
+		} else {
+			var n int
+			if n, err = io.ReadFull(r.r, r.raw[p:]); err != nil {
+				return
+			}
+			if _, err = io.ReadFull(r.r, r.raw[:int(l)-n]); err != nil {
+				return
+			}
+		}
+		r.wpos += l
+	} else {
+		low, err = r.r.ReadByte()
+		if err != nil {
+			return
+		}
+		off := (uint32((tag&0x0f))<<8 | uint32(low)) + 1
+		l = uint32((tag >> 4) + 2)
+		if tag>>4 == smallCopy-1 {
+			add, err = r.r.ReadByte()
+			if err != nil {
+				return
+			}
+			l += uint32(add)
+		}
+		p := r.wpos % buffer
+		f := (r.wpos - off) % buffer
+		for off < l {
+			r.copyN(f, p, off)
+			l -= off
+			r.wpos += off
+			p = r.wpos % buffer
+			off *= 2
+		}
+		r.copyN(f, p, l)
+		r.wpos += l
+	}
 	return
 }
 
