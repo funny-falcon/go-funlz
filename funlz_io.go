@@ -221,7 +221,7 @@ func (w *Writer) compress() (err error) {
 			if lim > wpos {
 				lim = wpos
 			}
-			for ue < wpos && w.raw[pe%buffer] == w.raw[ue%buffer] {
+			for ue < lim && w.raw[pe%buffer] == w.raw[ue%buffer] {
 				ue++
 				pe++
 			}
@@ -261,7 +261,7 @@ func (w *Writer) compress() (err error) {
 			if lim > wpos {
 				lim = wpos
 			}
-			for ue < wpos && w.raw[pe%buffer] == w.raw[ue%buffer] {
+			for ue < lim && w.raw[pe%buffer] == w.raw[ue%buffer] {
 				ue++
 				pe++
 			}
