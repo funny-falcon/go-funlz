@@ -471,8 +471,33 @@ func (r *Reader) Read(b []byte) (bytes int, err error) {
 			if err == io.ErrNoProgress {
 				err = nil
 			}
+			r.err = err
 			return
 		}
+	}
+	return
+}
+
+// ReadByte provides io.ByteReader
+func (r *Reader) ReadByte() (b byte, err error) {
+	if r.err != nil {
+		return 0, r.err
+	}
+	if r.wpos == r.rpos {
+	Retry:
+		if err = r.readTag(); err != nil {
+			if err == io.ErrNoProgress {
+				goto Retry
+			}
+			r.err = err
+			return
+		}
+	}
+	b = r.raw[r.rpos%buffer]
+	r.rpos++
+	if r.rpos == wrapsize {
+		r.rpos = 0
+		r.wpos = 0
 	}
 	return
 }
