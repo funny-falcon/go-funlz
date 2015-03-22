@@ -305,15 +305,6 @@ func (w *Writer) compress() (err error) {
 					w.hash[h].push(upos)
 				}
 			} else {
-				if lookbehind && m.cut > 4 {
-					cutpos := upos - m.cut
-					last = uint32(w.raw[cutpos%buffer])<<24 |
-						uint32(w.raw[(cutpos+1)%buffer])<<16 |
-						uint32(w.raw[(cutpos+2)%buffer])<<8 |
-						uint32(w.raw[(cutpos+3)%buffer])
-					h = (last * somemagicconst) >> (32 - hashlog)
-					w.hash[h].push(cutpos + 4)
-				}
 				upos += m.l - m.cut
 				last = uint32(w.raw[(upos-4)%buffer])<<24 |
 					uint32(w.raw[(upos-3)%buffer])<<16 |
