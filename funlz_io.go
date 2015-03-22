@@ -158,7 +158,7 @@ func (w *Writer) compress() (err error) {
 		var p, lastAtP, pb, pe, ub, ue, lim uint32
 		{
 			p = poses[0]
-			if upos-(p-1)+minCopy > wind || p == 0 {
+			if upos-p+minCopy > wind || p == 0 {
 				goto LoopEnd
 			}
 			p--
@@ -198,7 +198,7 @@ func (w *Writer) compress() (err error) {
 		for i := 1; i < len(poses); i++ {
 			p = poses[i]
 			/* insert new position and shift stored */
-			if upos-(p-1)+minCopy > wind || p == 0 {
+			if upos-p+minCopy > wind || p == 0 {
 				break
 			}
 			p--
