@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"runtime"
 	"testing"
 )
 
@@ -122,7 +123,7 @@ func eq(a, b []byte) int {
 	}
 	for i, c := range a {
 		if c != b[i] {
-			log.Print("!eq ", c, b[i], a[i-1], b[i-1], a[i+1], b[i+1])
+			log.Printf("!eq %x %x %x %x %x %x", c, b[i], a[i-1], b[i-1], a[i+1], b[i+1])
 			return i
 		}
 	}
@@ -208,15 +209,26 @@ func TestHugeFile(t *testing.T) {
 	comp := NewWriter(wr)
 	decomp := NewReader(rd)
 	log.Print("HugeFile")
+	const bl = 4081
+	crcch := make(chan uint32)
+	crceq := make(chan bool)
+	var wbuf [bl]byte
+	var rbuf [bl]byte
 	go func() {
-		var buf [512]byte
 		var last int
 		for {
-			n, _ := decomp.Read(buf[:])
+			n, _ := io.ReadFull(decomp, rbuf[:])
 			if n == 0 {
 				break
 			}
-			crc2 = crc32.Update(crc2, crc32c, buf[:n])
+			crc2 = crc32.Update(0, crc32c, rbuf[:n])
+			crc1 := <-crcch
+			if crc2 == crc1 {
+				crceq <- true
+			} else {
+				crceq <- false
+				break
+			}
 			sz2 += n
 			if sz2/1000000 > last {
 				last = sz2 / 1000000
@@ -225,16 +237,22 @@ func TestHugeFile(t *testing.T) {
 		}
 		close(fin)
 	}()
-	var buf [512]byte
-	for sz1 = 0; sz1 < 3*1<<29; sz1 += len(buf) {
-		k, _ := fl.Read(buf[:])
-		if k != 512 {
+	fl.Read(make([]byte, 1000000-5000))
+	for sz1 = 0; sz1 < 3*1<<28; sz1 += len(wbuf) {
+		k, _ := fl.Read(wbuf[:])
+		if k != len(wbuf) {
 			panic("k!=512")
 		}
-		crc1 = crc32.Update(crc1, crc32c, buf[:])
-		comp.Write(buf[:])
+		crc1 = crc32.Update(0, crc32c, wbuf[:])
+		comp.Write(wbuf[:])
+		comp.Flush()
+		runtime.Gosched()
+		crcch <- crc1
+		if !<-crceq {
+			t.Errorf("crc mismatch")
+			break
+		}
 	}
-	comp.Flush()
 	wr.Close()
 	<-fin
 	if sz1 != sz2 {
