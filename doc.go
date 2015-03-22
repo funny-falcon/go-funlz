@@ -38,6 +38,10 @@ type positions [backref]uint32
 
 /* you should fix this function accordantly to backref value */
 func (p *positions) push(u uint32) {
+	//p[7] = p[6]
+	//p[6] = p[5]
+	//p[5] = p[4]
+	//p[4] = p[3]
 	//p[3] = p[2]
 	//p[2] = p[1]
 	//p[1] = p[0]

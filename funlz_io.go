@@ -10,6 +10,7 @@ var _ = log.Print
 
 /* this constants are defined by format and should not be changed */
 const (
+	wrapsize  = 0x10000000
 	window    = 4096
 	buffer    = 2 * window
 	smallLit  = 30
@@ -28,64 +29,6 @@ type writeAndByteWriter interface {
 	io.ByteWriter
 }
 
-type bytewriter interface {
-	io.Writer
-	byte1(b byte) error
-	byte2(b1, b2 byte) error
-	byte3(b1, b2, b3 byte) error
-}
-
-type bytewrite1 struct {
-	io.Writer
-	buf [4]byte
-}
-
-func (bw *bytewrite1) byte1(b byte) (err error) {
-	bw.buf[0] = b
-	_, err = bw.Write(bw.buf[:1])
-	return
-}
-
-func (bw *bytewrite1) byte2(b1, b2 byte) (err error) {
-	bw.buf[0] = b1
-	bw.buf[1] = b2
-	_, err = bw.Write(bw.buf[:2])
-	return
-}
-
-func (bw *bytewrite1) byte3(b1, b2, b3 byte) (err error) {
-	bw.buf[0] = b1
-	bw.buf[1] = b2
-	bw.buf[2] = b3
-	_, err = bw.Write(bw.buf[:3])
-	return
-}
-
-type bytewrite2 struct {
-	writeAndByteWriter
-}
-
-func (bw *bytewrite2) byte1(b byte) (err error) {
-	err = bw.WriteByte(b)
-	return
-}
-
-func (bw *bytewrite2) byte2(b1, b2 byte) (err error) {
-	if err = bw.WriteByte(b1); err == nil {
-		err = bw.WriteByte(b2)
-	}
-	return
-}
-
-func (bw *bytewrite2) byte3(b1, b2, b3 byte) (err error) {
-	if err = bw.WriteByte(b1); err == nil {
-		if err = bw.WriteByte(b2); err == nil {
-			err = bw.WriteByte(b3)
-		}
-	}
-	return
-}
-
 /*
 Writer is a streaming compressor.
 It does no output buffering, so you should pass in buffered output.
@@ -99,7 +42,10 @@ Output stream is not framed and not checksumed.
 	out.Flush()
 */
 type Writer struct {
-	w          bytewriter
+	w  writeAndByteWriter
+	bw *bufio.Writer
+
+	wself      bool
 	err        error
 	upos, wpos uint32              /* uncompressed pos and write pos in raw buffer */
 	last       uint32              /* last 4 chars */
@@ -112,11 +58,28 @@ type Writer struct {
 func NewWriter(wr io.Writer) (w *Writer) {
 	w = &Writer{}
 	if wb, ok := wr.(writeAndByteWriter); ok {
-		w.w = &bytewrite2{writeAndByteWriter: wb}
+		w.w = wb
 	} else {
-		w.w = &bytewrite1{Writer: wr}
+		w.bw = bufio.NewWriter(wr)
+		w.w = w.bw
 	}
 	return w
+}
+
+func (w *Writer) byte2(b1, b2 byte) (err error) {
+	if err = w.w.WriteByte(b1); err == nil {
+		err = w.w.WriteByte(b2)
+	}
+	return
+}
+
+func (w *Writer) byte3(b1, b2, b3 byte) (err error) {
+	if err = w.w.WriteByte(b1); err == nil {
+		if err = w.w.WriteByte(b2); err == nil {
+			err = w.w.WriteByte(b3)
+		}
+	}
+	return
 }
 
 const wmask = 0x7f /* window mask */
@@ -139,8 +102,9 @@ func (w *Writer) Write(b []byte) (bytes int, err error) {
 			l = ul
 			do_compress = false
 		}
-		if w.wpos > 0xffffffff-l {
-			l = 0xffffffff - w.wpos
+		if w.wpos >= wrapsize-l {
+			l = wrapsize - w.wpos
+			do_compress = true
 		}
 		p := w.wpos % buffer
 		if p+l < buffer {
@@ -157,7 +121,7 @@ func (w *Writer) Write(b []byte) (bytes int, err error) {
 				bytes -= int((w.wpos + buffer - w.upos) % buffer)
 				break
 			}
-			if w.wpos == 0xffffffff {
+			if w.wpos == wrapsize {
 				if err = w.flush(); err != nil {
 					bytes -= int((w.wpos + buffer - w.upos) % buffer)
 					break
@@ -173,27 +137,28 @@ func (w *Writer) compress() (err error) {
 	last := w.last
 	upos, wpos := w.upos, w.wpos
 	litlen := w.litlen
-	for upos < 3 && upos < wpos {
-		last = (last << 8) | uint32(w.raw[upos])
-		litlen++
-		upos++
-	}
 	for upos < wpos {
 		cur := w.raw[upos%buffer]
 		last = (last << 8) | uint32(cur)
 		h := (last * somemagicconst) >> (32 - hashlog)
 		if litlen < minCopy-1 {
 			upos++
-			w.hash[h].push(upos)
+			if upos >= minCopy {
+				w.hash[h].push(upos)
+			}
 			litlen++
 			continue
 		}
 		poses := &w.hash[h]
 		m := struct{ l, p, cut uint32 }{0, 0, 0}
+		wind := uint32(window)
+		if wind > upos {
+			wind = upos
+		}
 		var p, lastAtP, pb, pe, ub, ue, lim uint32
 		{
 			p = poses[0]
-			if upos-p+litlen > window || p == 0 {
+			if upos-(p-1)+minCopy > wind || p == 0 {
 				goto LoopEnd
 			}
 			p--
@@ -217,7 +182,7 @@ func (w *Writer) compress() (err error) {
 			}
 			pb++
 			ub++
-			lim = ue - ub + maxCopy
+			lim = ub + maxCopy
 			if lim > wpos {
 				lim = wpos
 			}
@@ -233,7 +198,7 @@ func (w *Writer) compress() (err error) {
 		for i := 1; i < len(poses); i++ {
 			p = poses[i]
 			/* insert new position and shift stored */
-			if upos-p+litlen > window || p == 0 {
+			if upos-(p-1)+minCopy > wind || p == 0 {
 				break
 			}
 			p--
@@ -257,7 +222,7 @@ func (w *Writer) compress() (err error) {
 			}
 			pb++
 			ub++
-			lim = ue - ub + maxCopy
+			lim = ub + maxCopy
 			if lim > wpos {
 				lim = wpos
 			}
@@ -313,11 +278,11 @@ func (w *Writer) compress() (err error) {
 
 func (w *Writer) emitLit(pos, l uint32) (err error) {
 	if l <= smallLit {
-		if err = w.w.byte1(byte(l)); err != nil {
+		if err = w.w.WriteByte(byte(l)); err != nil {
 			return
 		}
 	} else {
-		if err = w.w.byte2((smallLit + 1), byte(l-(smallLit+1))); err != nil {
+		if err = w.byte2((smallLit + 1), byte(l-(smallLit+1))); err != nil {
 			return
 		}
 	}
@@ -335,23 +300,29 @@ func (w *Writer) emitCopy(off, l uint32) (err error) {
 	off--
 	hi, lo := byte(off>>8), byte(off)
 	if l <= smallCopy {
-		err = w.w.byte2(byte((l-2)<<4)|hi, lo)
+		err = w.byte2(byte((l-2)<<4)|hi, lo)
 	} else {
-		err = w.w.byte3((smallCopy+1-2)<<4|hi, lo, byte(l-(smallCopy+1))) /* 0xf0|hi , l-17 */
+		err = w.byte3((smallCopy+1-2)<<4|hi, lo, byte(l-(smallCopy+1))) /* 0xf0|hi , l-17 */
 	}
 	return
 }
 
 func (w *Writer) flush() error {
+	if w.upos != w.wpos {
+		panic("flush upos != wpos")
+	}
 	if w.litlen > 0 {
 		w.err = w.emitLit(w.upos-w.litlen, w.litlen)
 		w.litlen = 0
-	}
-	if w.err != nil {
-		return w.err
+		if w.err != nil {
+			return w.err
+		}
 	}
 	// flush mark
-	w.err = w.w.byte1(0)
+	w.err = w.w.WriteByte(0)
+	if w.bw != nil {
+		w.bw.Flush()
+	}
 	return w.err
 }
 
@@ -426,8 +397,8 @@ func (r *Reader) Read(b []byte) (bytes int, err error) {
 	for len(b) != 0 {
 		l := r.wpos - r.rpos
 		if l > 0 {
-			if ul := uint32(len(b)); ul < l {
-				l = ul
+			if len(b) < int(l) {
+				l = uint32(len(b))
 			}
 			p := r.rpos % buffer
 			if p+l <= buffer {
@@ -439,7 +410,7 @@ func (r *Reader) Read(b []byte) (bytes int, err error) {
 			bytes += int(l)
 			b = b[l:]
 			r.rpos += l
-			if r.rpos == 0xffffffff {
+			if r.rpos == wrapsize {
 				r.rpos = 0
 				r.wpos = 0
 			}
