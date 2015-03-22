@@ -91,7 +91,7 @@ func (w *Writer) Write(b []byte) (bytes int, err error) {
 		var l uint32
 		if w.upos >= window {
 			/* calculate rest in circular buffer */
-			l = (w.wpos + buffer - (w.upos - window)) % buffer
+			l = (buffer - window) - (w.wpos - w.upos)
 		} else {
 			l = buffer - w.wpos
 		}
@@ -124,7 +124,33 @@ func (w *Writer) Write(b []byte) (bytes int, err error) {
 					bytes -= int((w.wpos + buffer - w.upos) % buffer)
 					break
 				}
-				w.clear()
+			}
+		}
+	}
+	return
+}
+
+// WriteByte provides io.ByteWriter
+func (w *Writer) WriteByte(b byte) (err error) {
+	if w.err != nil {
+		return w.err
+	}
+	w.raw[w.wpos%buffer] = b
+	w.wpos++
+	var l uint32
+	if w.upos >= window {
+		/* calculate rest in circular buffer */
+		l = (buffer - window) - (w.wpos - w.upos)
+	} else {
+		l = buffer - w.wpos
+	}
+	if l == 0 || w.wpos == wrapsize {
+		if err = w.compress(); err != nil {
+			return
+		}
+		if w.wpos == wrapsize {
+			if err = w.flush(); err != nil {
+				return
 			}
 		}
 	}
@@ -352,10 +378,7 @@ func (w *Writer) flush() error {
 	if w.bw != nil {
 		w.bw.Flush()
 	}
-	return w.err
-}
-
-func (w *Writer) clear() {
+	/* clear state */
 	for i := range w.hash {
 		p := &w.hash[i]
 		for j := range p {
@@ -366,6 +389,7 @@ func (w *Writer) clear() {
 	w.wpos = 0
 	w.litlen = 0
 	w.last = 0
+	return w.err
 }
 
 // Flush writes all unwritten data to output. Returns error encounted during writting.
