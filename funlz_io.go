@@ -31,15 +31,13 @@ type writeAndByteWriter interface {
 
 /*
 Writer is a streaming compressor.
-It does no output buffering, so you should pass in buffered output.
-Output stream is not framed and not checksumed.
+If wrapped writer doesn't provide WriteByte method, then it is wrapped with bufio.Writer
+Output stream is not checksumed. Flush is marked with zero byte.
 
-	out := bufio.NewWriter(my_sock)
-	comp := funlz.NewWriter(out)
+	comp := funlz.NewWriter(my_sock)
 	comp.Write(message1)
 	comp.Write(message2)
 	comp.Flush()
-	out.Flush()
 */
 type Writer struct {
 	w  writeAndByteWriter
@@ -170,18 +168,22 @@ func (w *Writer) compress() (err error) {
 			if lastAtP != last {
 				goto Loop
 			}
-			pb, pe = p-4, p+1
-			ub, ue = upos-4, upos+1
-			lim = p - litlen
-			if p < litlen {
-				lim = 0
+			pe, ue = p+1, upos+1
+			if lookbehind {
+				pb, ub = p-4, upos-4
+				lim = p - litlen
+				if p < litlen {
+					lim = 0
+				}
+				for pb > lim && w.raw[pb%buffer] == w.raw[ub%buffer] {
+					pb--
+					ub--
+				}
+				pb++
+				ub++
+			} else {
+				pb, ub = p-3, upos-3
 			}
-			for pb > lim && w.raw[pb%buffer] == w.raw[ub%buffer] {
-				pb--
-				ub--
-			}
-			pb++
-			ub++
 			lim = ub + maxCopy
 			if lim > wpos {
 				lim = wpos
@@ -210,18 +212,22 @@ func (w *Writer) compress() (err error) {
 			if lastAtP != last {
 				continue
 			}
-			pb, pe = p-4, p+1
-			ub, ue = upos-4, upos+1
-			lim = p - litlen
-			if p < litlen {
-				lim = 0
+			pe, ue = p+1, upos+1
+			if lookbehind {
+				pb, ub = p-4, upos-4
+				lim = p - litlen
+				if p < litlen {
+					lim = 0
+				}
+				for pb > lim && w.raw[pb%buffer] == w.raw[ub%buffer] {
+					pb--
+					ub--
+				}
+				pb++
+				ub++
+			} else {
+				pb, ub = p-3, upos-3
 			}
-			for pb > lim && w.raw[pb%buffer] == w.raw[ub%buffer] {
-				pb--
-				ub--
-			}
-			pb++
-			ub++
 			lim = ub + maxCopy
 			if lim > wpos {
 				lim = wpos
@@ -261,10 +267,29 @@ func (w *Writer) compress() (err error) {
 			if err = w.emitCopy(upos-m.cut-m.p, m.l); err != nil {
 				break
 			}
-			for i := m.l - m.cut; i != 0; i-- {
-				last = (last << 8) | uint32(w.raw[upos%buffer])
+			if hashcopy {
+				for i := m.l - m.cut; i != 0; i-- {
+					last = (last << 8) | uint32(w.raw[upos%buffer])
+					h = (last * somemagicconst) >> (32 - hashlog)
+					upos++
+					w.hash[h].push(upos)
+				}
+			} else {
+				if lookbehind && m.cut > 4 {
+					cutpos := upos - m.cut
+					last = uint32(w.raw[cutpos%buffer])<<24 |
+						uint32(w.raw[(cutpos+1)%buffer])<<16 |
+						uint32(w.raw[(cutpos+2)%buffer])<<8 |
+						uint32(w.raw[(cutpos+3)%buffer])
+					h = (last * somemagicconst) >> (32 - hashlog)
+					w.hash[h].push(cutpos + 4)
+				}
+				upos += m.l - m.cut
+				last = uint32(w.raw[(upos-4)%buffer])<<24 |
+					uint32(w.raw[(upos-3)%buffer])<<16 |
+					uint32(w.raw[(upos-2)%buffer])<<8 |
+					uint32(w.raw[(upos-1)%buffer])
 				h = (last * somemagicconst) >> (32 - hashlog)
-				upos++
 				w.hash[h].push(upos)
 			}
 		}

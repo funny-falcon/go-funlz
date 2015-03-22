@@ -24,13 +24,22 @@ package funlz
 
 /*
 tunable consts
-backref = 1 is always faster
-backref/hashlog 1/11 usualy gives same compression ratio size as 2/9, but faster
-backref/hashlog 4/12 gives good compression ratio, but it is slow
 */
 const (
-	backref = 1  /* number of backreferences for each hash slot */
-	hashlog = 11 /* log2 of hash positions */
+	// number of buckets in backreference hash is pow(2,hashlog)
+	// larger hashlog - larger compression ratio
+	hashlog = 11
+	// backref is number of elements for each hash bucket.
+	// lesser backref - faster compression but lesser compression ratio
+	// if you change backref, then change (*positions).push accordantly
+	// backref/hashlog==1/11 usualy gives same compression ratio size as 2/9, but faster
+	// backref/hashlog==4/12 gives good compression ratio, but it is slow
+	// Sizeof(hash) == 4*backref*pow(2, hashlog). If it is more than half of L1 CPU cache, compression can be slow.
+	backref = 1
+	// put reference to copied bytes or skip it
+	hashcopy = false
+	// look back from matched position
+	lookbehind = false
 )
 
 /* size of positions could be increased to accieve more compression */

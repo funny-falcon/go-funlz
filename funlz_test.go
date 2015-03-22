@@ -141,7 +141,7 @@ func init() {
 	add("aaaaaaaa", "\x01a\x50\x00\x00")
 	add("aaaaaaaab", "\x01a\x50\x00\x01b\x00")
 	add("baaaaaaaab", "\x02ba\x50\x00\x01b\x00")
-	if backref > 1 {
+	if backref > 1 && hashcopy {
 		add("baaaaacaaaaaaaaaaaaaaaaaaaaaaaaaaaab", "\x02ba\x20\x00\x01c\x30\x05\xf0\x00\x06\x01b\x00")
 		add("baaaaacaaaaaaaaaaaaaaaaaaaaaaaaaaab", "\x02ba\x20\x00\x01c\x30\x05\xf0\x00\x05\x01b\x00")
 	} else {
