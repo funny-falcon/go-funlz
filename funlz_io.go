@@ -174,6 +174,8 @@ func (w *Writer) compress() (err error) {
 				lim = p - litlen
 				if p < litlen {
 					lim = 0
+				} else if upos-lim > wind {
+					lim = upos - wind
 				}
 				for pb > lim && w.raw[pb%buffer] == w.raw[ub%buffer] {
 					pb--
@@ -218,6 +220,8 @@ func (w *Writer) compress() (err error) {
 				lim = p - litlen
 				if p < litlen {
 					lim = 0
+				} else if upos-lim > wind {
+					lim = upos - wind
 				}
 				for pb > lim && w.raw[pb%buffer] == w.raw[ub%buffer] {
 					pb--
