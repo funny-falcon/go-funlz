@@ -551,7 +551,7 @@ func (r *Reader) readTag() (err error) {
 			r.copyN(f, p, off)
 			l -= off
 			r.wpos += off
-			p = r.wpos % buffer
+			p = (p + off) % buffer
 			off *= 2
 		}
 		r.copyN(f, p, l)
