@@ -561,17 +561,15 @@ func (r *Reader) readTag() (err error) {
 }
 
 func (r *Reader) copyN(f, p, n uint32) {
-	for n != 0 {
-		t := n
-		if f+t > buffer {
-			t = buffer - f
-		}
-		if p+t > buffer {
-			t = buffer - p
-		}
-		copy(r.raw[p:p+t], r.raw[f:f+t])
-		f = (f + t) % buffer
-		p = (p + t) % buffer
-		n = n - t
+	if f+n > buffer {
+		k := buffer - f
+		copy(r.raw[p:p+k], r.raw[f:])
+		copy(r.raw[p+k:p+n], r.raw[:n-k])
+	} else if p+n > buffer {
+		k := buffer - p
+		copy(r.raw[p:], r.raw[f:f+k])
+		copy(r.raw[:n-k], r.raw[f+k:f+n])
+	} else {
+		copy(r.raw[p:p+n], r.raw[f:f+n])
 	}
 }
