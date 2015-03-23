@@ -310,8 +310,10 @@ func (w *Writer) compress() (err error) {
 					uint32(w.raw[(upos-3)%buffer])<<16 |
 					uint32(w.raw[(upos-2)%buffer])<<8 |
 					uint32(w.raw[(upos-1)%buffer])
-				h = (last * somemagicconst) >> (32 - hashlog)
-				w.hash[h].push(upos)
+				hh := (last * somemagicconst) >> (32 - hashlog)
+				if h != hh {
+					w.hash[hh].push(upos)
+				}
 			}
 		}
 	}
