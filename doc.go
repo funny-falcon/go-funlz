@@ -43,10 +43,10 @@ const (
 )
 
 /* size of positions could be increased to accieve more compression */
-type positions [backref]uint32
+type positions [backref]int32
 
 /* you should fix this function accordantly to backref value */
-func (p *positions) push(u uint32) {
+func (p *positions) push(u int32) {
 	//p[7] = p[6]
 	//p[6] = p[5]
 	//p[5] = p[4]

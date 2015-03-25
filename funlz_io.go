@@ -45,9 +45,9 @@ type Writer struct {
 
 	wself      bool
 	err        error
-	upos, wpos uint32              /* uncompressed pos and write pos in raw buffer */
+	upos, wpos int32               /* uncompressed pos and write pos in raw buffer */
 	last       uint32              /* last 4 chars */
-	litlen     uint32              /* lengh of last literal */
+	litlen     int32               /* lengh of last literal */
 	hash       [hashsize]positions /* hash of positions */
 	raw        [buffer]byte        /* input buffer */
 }
@@ -88,7 +88,7 @@ func (w *Writer) Write(b []byte) (bytes int, err error) {
 		return 0, w.err
 	}
 	for len(b) != 0 {
-		var l uint32
+		var l int32
 		if w.upos >= window {
 			/* calculate rest in circular buffer */
 			l = (buffer - window) - (w.wpos - w.upos)
@@ -96,7 +96,7 @@ func (w *Writer) Write(b []byte) (bytes int, err error) {
 			l = buffer - w.wpos
 		}
 		do_compress := true
-		if ul := uint32(len(b)); ul < l {
+		if ul := int32(len(b)); ul < l {
 			l = ul
 			do_compress = false
 		}
@@ -137,7 +137,7 @@ func (w *Writer) WriteByte(b byte) (err error) {
 	}
 	w.raw[w.wpos%buffer] = b
 	w.wpos++
-	var l uint32
+	var l int32
 	if w.upos >= window {
 		/* calculate rest in circular buffer */
 		l = (buffer - window) - (w.wpos - w.upos)
@@ -174,12 +174,13 @@ func (w *Writer) compress() (err error) {
 			continue
 		}
 		poses := &w.hash[h]
-		m := struct{ l, p, cut uint32 }{0, 0, 0}
-		wind := uint32(window)
+		m := struct{ l, p, cut int32 }{0, 0, 0}
+		wind := int32(window)
 		if wind > upos {
 			wind = upos
 		}
-		var p, lastAtP, pb, pe, ub, ue, lim uint32
+		var lastAtP uint32
+		var p, pb, pe, ub, ue, lim int32
 		{
 			p = poses[0]
 			if upos-p+minCopy > wind || p == 0 {
@@ -227,7 +228,7 @@ func (w *Writer) compress() (err error) {
 	Loop:
 		for i := 1; i < len(poses); i++ {
 			p = poses[i]
-			/* insert new position and shift stored */
+			// insert new position and shift stored
 			if upos-p+minCopy > wind || p == 0 {
 				break
 			}
@@ -324,7 +325,7 @@ func (w *Writer) compress() (err error) {
 	return
 }
 
-func (w *Writer) emitLit(pos, l uint32) (err error) {
+func (w *Writer) emitLit(pos, l int32) (err error) {
 	if l <= smallLit {
 		if err = w.w.WriteByte(byte(l)); err != nil {
 			return
@@ -344,7 +345,7 @@ func (w *Writer) emitLit(pos, l uint32) (err error) {
 	return
 }
 
-func (w *Writer) emitCopy(off, l uint32) (err error) {
+func (w *Writer) emitCopy(off, l int32) (err error) {
 	off--
 	hi, lo := byte(off>>8), byte(off)
 	if l <= smallCopy {
@@ -412,7 +413,7 @@ Input is tested to have ReadByte method. If it has no, then input is wrapped int
 type Reader struct {
 	r          readAndByteReader
 	err        error
-	rpos, wpos uint32
+	rpos, wpos int32
 	raw        [buffer]byte /* uncompressed data */
 }
 
@@ -444,14 +445,15 @@ func (r *Reader) Read(b []byte) (bytes int, err error) {
 		l := r.wpos - r.rpos
 		if l > 0 {
 			if len(b) < int(l) {
-				l = uint32(len(b))
+				l = int32(len(b))
 			}
 			p := r.rpos % buffer
 			if p+l <= buffer {
 				copy(b, r.raw[p:p+l])
 			} else {
-				n := copy(b, r.raw[p:])
-				copy(b[n:], r.raw[:int(l)-n])
+				n := buffer - p
+				copy(b, r.raw[p:])
+				copy(b[n:], r.raw[:l-n])
 			}
 			bytes += int(l)
 			b = b[l:]
@@ -497,7 +499,7 @@ func (r *Reader) ReadByte() (b byte, err error) {
 
 func (r *Reader) readTag() (err error) {
 	var tag, add, low byte
-	var l uint32
+	var l int32
 	tag, err = r.r.ReadByte()
 	if err != nil {
 		return
@@ -508,13 +510,13 @@ func (r *Reader) readTag() (err error) {
 	}
 	if tag < 0x20 {
 		/* literal */
-		l = uint32(tag)
+		l = int32(tag)
 		if tag == smallLit+1 {
 			add, err = r.r.ReadByte()
 			if err != nil {
 				return
 			}
-			l += uint32(add)
+			l += int32(add)
 		}
 		p := r.wpos % buffer
 		if p+l <= buffer {
@@ -536,14 +538,14 @@ func (r *Reader) readTag() (err error) {
 		if err != nil {
 			return
 		}
-		off := (uint32((tag&0x0f))<<8 | uint32(low)) + 1
-		l = uint32((tag >> 4) + 2)
+		off := (int32((tag&0x0f))<<8 | int32(low)) + 1
+		l = int32((tag >> 4) + 2)
 		if tag>>4 == smallCopy-1 {
 			add, err = r.r.ReadByte()
 			if err != nil {
 				return
 			}
-			l += uint32(add)
+			l += int32(add)
 		}
 		p := r.wpos % buffer
 		f := (r.wpos - off) % buffer
@@ -560,7 +562,7 @@ func (r *Reader) readTag() (err error) {
 	return
 }
 
-func (r *Reader) copyN(f, p, n uint32) {
+func (r *Reader) copyN(f, p, n int32) {
 	if f+n > buffer {
 		k := buffer - f
 		copy(r.raw[p:p+k], r.raw[f:])
