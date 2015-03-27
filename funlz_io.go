@@ -437,36 +437,41 @@ func (r *Reader) Read(b []byte) (bytes int, err error) {
 	if r.err != nil {
 		return 0, r.err
 	}
-	for len(b) != 0 {
-		l := r.wpos - r.rpos
-		if l > 0 {
-			if len(b) < int(l) {
-				l = int32(len(b))
-			}
-			p := r.rpos % buffer
-			if p+l <= buffer {
-				copy(b, r.raw[p:p+l])
-			} else {
-				n := buffer - p
-				copy(b, r.raw[p:])
-				copy(b[n:], r.raw[:l-n])
-			}
-			bytes += int(l)
-			b = b[l:]
-			r.rpos += l
-			if r.rpos == wrapsize {
-				r.rpos = 0
-				r.wpos = 0
-			}
-		} else if err = r.readTag(); err != nil {
-			if err == io.ErrNoProgress {
-				err = nil
-			}
-			r.err = err
-			return
+	n := int32(window / 2)
+	if int(n) > len(b)+64 {
+		n = int32(len(b)) + 64
+	}
+	npos := r.rpos + n
+	for r.wpos < npos && err == nil {
+		if err = r.readTag(); err != nil {
+			break
 		}
 	}
-	return
+	l := r.wpos - r.rpos
+	if l > 0 {
+		if len(b) < int(l) {
+			l = int32(len(b))
+		}
+		p := r.rpos % buffer
+		if p+l <= buffer {
+			copy(b, r.raw[p:p+l])
+		} else {
+			n = buffer - p
+			copy(b, r.raw[p:])
+			copy(b[n:], r.raw[:l-n])
+		}
+		b = b[l:]
+		r.rpos += l
+		if r.rpos == wrapsize {
+			r.rpos = 0
+			r.wpos = 0
+		}
+	}
+	if err == io.ErrNoProgress {
+		err = nil
+	}
+	r.err = err
+	return int(l), err
 }
 
 // ReadByte provides io.ByteReader
