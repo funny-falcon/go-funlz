@@ -3,6 +3,7 @@ package funlz
 import (
 	"bytes"
 	"compress/flate"
+	"fmt"
 	"hash/crc32"
 	"io"
 	"io/ioutil"
@@ -130,10 +131,14 @@ func eq(a, b []byte) int {
 	return -1
 }
 
-var patterns [][2][]byte
+var patterns [][][]byte
 
-func add(raw, comp string) {
-	patterns = append(patterns, [2][]byte{[]byte(raw), []byte(comp)})
+func add(raw string, comp ...string) {
+	ln := [][]byte{[]byte(raw)}
+	for _, c := range comp {
+		ln = append(ln, []byte(c))
+	}
+	patterns = append(patterns, ln)
 }
 
 func init() {
@@ -141,18 +146,13 @@ func init() {
 	add("aaaaaaaa", "\x01a\x50\x00\x00")
 	add("aaaaaaaab", "\x01a\x50\x00\x01b\x00")
 	add("baaaaaaaab", "\x02ba\x50\x00\x01b\x00")
-	if backref > 1 && hashcopy {
-		add("baaaaacaaaaaaaaaaaaaaaaaaaaaaaaaaaab", "\x02ba\x20\x00\x01c\x30\x05\xf0\x00\x06\x01b\x00")
-		add("baaaaacaaaaaaaaaaaaaaaaaaaaaaaaaaab", "\x02ba\x20\x00\x01c\x30\x05\xf0\x00\x05\x01b\x00")
-	} else {
-		add("baaaaacaaaaaaaaaaaaaaaaaaaaaaaaaaaab", "\x02ba\x20\x00\x01c\x20\x04\xf0\x00\x07\x01b\x00")
-		add("baaaaacaaaaaaaaaaaaaaaaaaaaaaaaaaab", "\x02ba\x20\x00\x01c\x20\x04\xf0\x00\x06\x01b\x00")
-	}
+	add("baaaaacaaaaaaaaaaaaaaaaaaaaaaaaaaaab", "\x02ba\x20\x00\x01c\x30\x05\xf0\x00\x06\x01b\x00", "\x02ba\x20\x00\x01c\x20\x04\xf0\x00\x07\x01b\x00")
+	add("baaaaacaaaaaaaaaaaaaaaaaaaaaaaaaaab", "\x02ba\x20\x00\x01c\x30\x05\xf0\x00\x05\x01b\x00", "\x02ba\x20\x00\x01c\x20\x04\xf0\x00\x06\x01b\x00")
 	add("This is a new era of my life with all good things", "\x1f\x12This is a new era of my life with all good things\x00")
 	add("This is a new era of my life with all good things. That is my new life.", "\x1f\x18This is a new era of my life with all good things. That\x20\x32\x02my\x30\x33\x20\x29\x01.\x00")
 }
 
-var original, original1, compressed, compressed11111, flatted, flatted11111 []byte
+var original, original1, compressed, compressed11111, flatted, flattedByPart, flatted11111 []byte
 
 func init() {
 	original, _ = ioutil.ReadFile("GettingReal.html")
@@ -161,17 +161,38 @@ func init() {
 	compressed11111 = compress(original[:11111])
 	flatted = inflate(original)
 	flatted11111 = inflate(original[:11111])
+	var bp bytes.Buffer
+	rd := bytes.NewBuffer(original)
+	fl, _ := flate.NewWriter(&bp, 1)
+	var rnd uint32
+	for {
+		rnd = rnd*5 + 1
+		_, err := io.CopyN(fl, rd, int64((rnd%128+1)*2))
+		fl.Flush()
+		if err != nil {
+			break
+		}
+	}
+	flattedByPart = bp.Bytes()
 }
 
 var crc32c = crc32.MakeTable(crc32.Castagnoli)
 
 func TestWriter(t *testing.T) {
+Loop:
 	for _, p := range patterns {
-		u, c := p[0], p[1]
+		u := p[0]
 		o := compress(u)
-		if eq(c, o) != -1 {
-			t.Errorf("not equal\n%#v\n%#v", c, o)
+		for _, c := range p[1:] {
+			if eq(c, o) == -1 {
+				continue Loop
+			}
 		}
+		msg := fmt.Sprintf("not equal\n%#v", o)
+		for _, c := range p[1:] {
+			msg = fmt.Sprintf("%s\n%#v", msg, c)
+		}
+		t.Error(msg)
 	}
 }
 
@@ -327,6 +348,6 @@ func BenchmarkDeflateMedium(b *testing.B) {
 }
 
 func BenchmarkDeflatePart(b *testing.B) {
-	u := &circDecomp{mk: func(r io.Reader) io.Reader { return flate.NewReader(r) }, b: flatted}
+	u := &circDecomp{mk: func(r io.Reader) io.Reader { return flate.NewReader(r) }, b: flattedByPart}
 	decompByPart(u, b.N)
 }
