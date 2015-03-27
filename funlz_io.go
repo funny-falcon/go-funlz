@@ -175,34 +175,33 @@ func (w *Writer) compress() (err error) {
 		}
 		poses := &w.hash[h]
 		m := struct{ l, p, cut int32 }{0, 0, 0}
-		wind := int32(window)
-		if wind > upos {
-			wind = upos
+		var wind int32
+		if upos > window {
+			wind = upos - window
+		} else {
+			wind = 0
 		}
 		var lastAtP uint32
 		var p, pb, pe, ub, ue, lim int32
 		{
 			p = poses[0]
-			if upos-p+minCopy > wind || p == 0 {
+			if p-minCopy < wind {
 				goto LoopEnd
 			}
-			p--
-			if w.raw[p%buffer] != cur {
+			if w.raw[(p-1)%buffer] != cur {
 				goto Loop
 			}
-			lastAtP = uint32(cur) | uint32(w.raw[(p-1)%buffer])<<8 |
-				uint32(w.raw[(p-2)%buffer])<<16 | uint32(w.raw[(p-3)%buffer])<<24
+			lastAtP = uint32(cur) | uint32(w.raw[(p-2)%buffer])<<8 |
+				uint32(w.raw[(p-3)%buffer])<<16 | uint32(w.raw[(p-4)%buffer])<<24
 			if lastAtP != last {
 				goto Loop
 			}
-			pe, ue = p+1, upos+1
+			pe, ue = p, upos+1
 			if lookbehind {
-				pb, ub = p-4, upos-4
+				pb, ub = p-5, upos-4
 				lim = p - litlen
-				if p < litlen {
-					lim = 0
-				} else if upos-lim > wind {
-					lim = upos - wind
+				if lim < wind {
+					lim = wind
 				}
 				for pb > lim && w.raw[pb%buffer] == w.raw[ub%buffer] {
 					pb--
@@ -211,7 +210,7 @@ func (w *Writer) compress() (err error) {
 				pb++
 				ub++
 			} else {
-				pb, ub = p-3, upos-3
+				pb, ub = p-4, upos-3
 			}
 			lim = ub + maxCopy
 			if lim > wpos {
@@ -223,32 +222,29 @@ func (w *Writer) compress() (err error) {
 			}
 			m.l = pe - pb
 			m.p = pb
-			m.cut = p + 1 - pb
+			m.cut = p - pb
 		}
 	Loop:
 		for i := 1; i < len(poses); i++ {
 			p = poses[i]
 			// insert new position and shift stored
-			if upos-p+minCopy > wind || p == 0 {
+			if p-minCopy < wind {
 				break
 			}
-			p--
-			if w.raw[p%buffer] != cur {
+			if w.raw[(p-1)%buffer] != cur {
 				continue
 			}
-			lastAtP = uint32(cur) | uint32(w.raw[(p-1)%buffer])<<8 |
-				uint32(w.raw[(p-2)%buffer])<<16 | uint32(w.raw[(p-3)%buffer])<<24
+			lastAtP = uint32(cur) | uint32(w.raw[(p-2)%buffer])<<8 |
+				uint32(w.raw[(p-3)%buffer])<<16 | uint32(w.raw[(p-4)%buffer])<<24
 			if lastAtP != last {
 				continue
 			}
-			pe, ue = p+1, upos+1
+			pe, ue = p, upos+1
 			if lookbehind {
-				pb, ub = p-4, upos-4
+				pb, ub = p-5, upos-4
 				lim = p - litlen
-				if p < litlen {
-					lim = 0
-				} else if upos-lim > wind {
-					lim = upos - wind
+				if lim < wind {
+					lim = wind
 				}
 				for pb > lim && w.raw[pb%buffer] == w.raw[ub%buffer] {
 					pb--
@@ -257,7 +253,7 @@ func (w *Writer) compress() (err error) {
 				pb++
 				ub++
 			} else {
-				pb, ub = p-3, upos-3
+				pb, ub = p-4, upos-3
 			}
 			lim = ub + maxCopy
 			if lim > wpos {
@@ -270,7 +266,7 @@ func (w *Writer) compress() (err error) {
 			if m.l < pe-pb {
 				m.l = pe - pb
 				m.p = pb
-				m.cut = p + 1 - pb
+				m.cut = p - pb
 			}
 		}
 	LoopEnd:
